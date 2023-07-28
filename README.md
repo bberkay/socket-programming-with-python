@@ -1,2 +1,2 @@
-# socket-programming-with-python
- Socket Programming with Python
+# Socket Programming with Python
+The main goal is to practice
