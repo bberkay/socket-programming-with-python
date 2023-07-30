@@ -7,6 +7,7 @@
 
 import socket
 import threading
+import keyboard
 
 class Server:
     """
@@ -37,10 +38,10 @@ class Server:
         print(f"[Server] Server started on {self.host}:{self.port}")
 
         # Start accepting connections
-        self.__accept_connections()
+        threading.Thread(target=self.__accept_connections).start()
 
         # Get the command from the server owner
-        self.__get_command()
+        threading.Thread(target=self.__run_command).start()
 
     def __accept_connections(self) -> None:
         """
@@ -59,17 +60,13 @@ class Server:
                 self.__close_client(client_id)
                 print(f"[Server] An error occurred while client({client_id}) handling, Error: {e}")
 
-    def __get_command(self) -> None:
+    def __run_command(self) -> None:
         """
-            Get the command from the server owner.
+            Run the command from the server owner.
         """
-        while True:
-            command = input("[Server] Enter a command: ")
 
-            # If the command is "exit", close the server
-            if command == "exit":
-                self.stop()
-                break
+        # If the server owner presses the "q" key, stop the server
+        keyboard.on_press_key("q", lambda _: self.stop())
 
     def __handle_client(self, client: socket.socket, client_id: str) -> None:
         """
@@ -87,28 +84,25 @@ class Server:
         # Send a message to all clients that the client has joined
         self.__broadcast(f"[Broadcast] {username} has joined the chat!", username)
 
-        """while True:
+        while True:
             try:
                 # Get the message from the client
                 message = client.recv(1024)
 
                 # If the message is empty, the client has disconnected
-                if not message or message.decode("utf-8") == "exit":
-                    self.__broadcast(f"[Broadcast] {username} has left the chat!".encode("utf-8"))
+                if not message:
+                    # Close the client's connection
+                    self.__close_client(client_id)
                     break
-
-                # Send the message to all clients
-                self.__broadcast(message, username)
-            except Exception as e:
+                else:
+                    # Send the message to all clients
+                    self.__broadcast(message, username)
+            except:
                 # If an error occurs, close the client's connection
-                self.__broadcast(f"[Broadcast] {username} unexpectedly disconnected!".encode("utf-8"), username)
-                print(f"[Server] {client_id} has disconnected! Error: {e}")
+                self.__close_client(client_id)
                 break
 
-        # Close the client's connection
-        self.__close_client(client_id)"""
-
-    def __broadcast(self, message: str, sender_username: str | None = None) -> None:
+    def __broadcast(self, message: str|bytes, sender_username: str | None = None) -> None:
         """
             Broadcast a message to all clients.
         """
@@ -118,8 +112,8 @@ class Server:
                 # If the client is not the sender, send the message
                 if self.__clients[client]["client_username"] != sender_username:
                     self.__clients[client]["client_socket"].send(message.encode("utf-8"))
-        except Exception as e:
-            print("[Server] An error occurred while broadcasting a message! Error: ", e)
+        except:
+            pass
 
     def __close_client(self, client_id: str) -> None:
         """
@@ -127,10 +121,11 @@ class Server:
         """
 
         # Close the client's connection
-        self.__clients[client_id]["client_socket"].close()
-        del self.__clients[client_id]
-        self.__broadcast(f"[Broadcast] {self.__clients[client_id]['username']} has left the chat!")
-        print(f"[Server] {client_id} is closed.")
+        if client_id in self.__clients:
+            self.__clients[client_id]["client_socket"].close()
+            self.__broadcast(f"[Broadcast] {self.__clients[client_id]['client_username']} has left the chat!")
+            print(f"[Server] {client_id} is closed.")
+            del self.__clients[client_id]
 
     def stop(self) -> None:
         """
