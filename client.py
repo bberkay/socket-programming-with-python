@@ -1,3 +1,12 @@
+"""
+    Client
+    ------
+    A simple TCP client that connects to a server and receives messages from it.
+    The client can be stopped by pressing the "q" key.
+
+    - All descriptions and comments created by ChatGPT and GitHub Copilot
+"""
+
 import socket
 import threading
 import keyboard
