@@ -1,148 +1,128 @@
 """
     Server
     ------
+    This module represents a TCP server. It can handle multiple clients at the same time. It uses threads for handling
+    the clients. It also broadcasts the messages to all clients except the sender client. It also handles the
+    disconnection of the clients. If a client disconnects from the server, it removes the client from the list and
+    broadcasts a message to all clients.
 
     - All descriptions and comments created by ChatGPT and GitHub Copilot
 """
 
 import socket
 import threading
-import keyboard
 
 class Server:
     """
-        Server class for the TCP server.
+        This class represents a TCP server.
     """
 
-    def __init__(self, host: str | None = None, port: int | None = None, max_connections: int | None = 5):
+    def __init__(self, host: str, port: int):
         """
-            Constructor for the Server class.
+            Constructor
         """
+        self.host = host
+        self.port = port
+        self.clients = []
+        self.__server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-        # Set the host, port, and max connections
-        self.host = "127.0.0.1" if host is None else host
-        self.port = 55555 if port is None else port
-        self.max_connections = max_connections
-        self.__server = None
-        self.__clients = {}
+        # This line is for reusing the same socket even if it is closed.
+        self.__server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-    def start(self) -> None:
+        # Bind the socket to the host and port.
+        self.__server_socket.bind((self.host, self.port))
+
+    def start(self):
         """
-            Start the server.
-        """
-        # Create a new socket
-        self.__server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.__server.bind((self.host, self.port))
-        self.__server.listen(self.max_connections)
-
-        print(f"[Server] Server started on {self.host}:{self.port}")
-
-        # Start accepting connections
-        threading.Thread(target=self.__accept_connections).start()
-
-        # Get the command from the server owner
-        threading.Thread(target=self.__run_command).start()
-
-    def __accept_connections(self) -> None:
-        """
-            Accept connections from clients.
-        """
-        while True:
-            client, address = self.__server.accept()
-            client_id = f"{address[0]}:{address[1]}"
-            print(f"[Server] {client_id} has connected!")
-
-            try:
-                # Start a new thread for the client
-                threading.Thread(target=self.__handle_client, args=(client, client_id,)).start()
-            except Exception as e:
-                # If an error occurs, close the client's connection
-                self.__close_client(client_id)
-                print(f"[Server] An error occurred while client({client_id}) handling, Error: {e}")
-
-    def __run_command(self) -> None:
-        """
-            Run the command from the server owner.
+            Starts the server.
         """
 
-        # If the server owner presses the "q" key, stop the server
-        keyboard.on_press_key("q", lambda _: self.stop())
+        # Listen for connections.
+        self.__server_socket.listen(5)
+        print(f"[from server] Server is listening on {self.host}:{self.port}")
+        try:
+            while True:
+                # Accept the connection from the client.
+                client_socket, client_address = self.__server_socket.accept()
+                self.clients.append(client_socket)
 
-    def __handle_client(self, client: socket.socket, client_id: str) -> None:
+                # Create a thread for the client.
+                threading.Thread(target=self.handle_client, args=(client_socket, client_address)).start()
+        except KeyboardInterrupt:
+            print("[from server] Server is shutting down...")
+
+            # Send a message to all clients and close the server socket.
+            for client_socket in self.clients:
+                client_socket.send("[from server] Server is shutting down. Goodbye!".encode())
+                client_socket.close()
+
+            self.__server_socket.close()
+
+    def handle_client(self, client_socket: socket.socket, client_address: tuple):
         """
-            Handle a client.
+            Handles the client.
         """
-        # Get the client's username
-        username = client.recv(1024).decode("utf-8")
 
-        # Add the client to the list of clients
-        self.__clients[client_id] = {"client_socket": client, "client_username": username}
+        try:
+            # Receive the client name.
+            client_name = client_socket.recv(1024).decode()
+            self.broadcast(f"[from server] Welcome, {client_name}!")
+            print(f"[from server] {client_name} ({client_address}) has joined the server.")
+            while True:
+                # Receive the message from the client.
+                message = client_socket.recv(1024).decode()
 
-        # Send a welcome message to the client
-        client.send(f"[Server] Hi {username}, Welcome to the chat!".encode("utf-8"))
-
-        # Send a message to all clients that the client has joined
-        self.__broadcast(f"[Broadcast] {username} has joined the chat!", username)
-
-        while True:
-            try:
-                # Get the message from the client
-                message = client.recv(1024)
-
-                # If the message is empty, the client has disconnected
-                if not message:
-                    # Close the client's connection
-                    self.__close_client(client_id)
+                # If the message is "exit", remove the client from the list and break the loop.
+                if message.lower() == "exit" or not message:
+                    self.remove_client(client_socket)
                     break
                 else:
-                    # Send the message to all clients
-                    self.__broadcast(message, username)
-            except:
-                # If an error occurs, close the client's connection
-                self.__close_client(client_id)
-                break
-
-    def __broadcast(self, message: str|bytes, sender_username: str | None = None) -> None:
-        """
-            Broadcast a message to all clients.
-        """
-        try:
-            # Loop through all clients
-            for client in self.__clients:
-                # If the client is not the sender, send the message
-                if self.__clients[client]["client_username"] != sender_username:
-                    self.__clients[client]["client_socket"].send(message.encode("utf-8"))
+                    # Broadcast the message to all clients.
+                    self.broadcast(f"{client_name}: {message}", client_socket)
         except:
-            pass
+            # If there is an error while receiving the message from the client, remove the client from the list.
+            self.remove_client(client_socket)
 
-    def __close_client(self, client_id: str) -> None:
+    def broadcast(self, message: str, sender_client: socket.socket = None):
         """
-            Close a client's connection.
+            Broadcasts the message to all clients except the sender client.
         """
+        for client_socket in self.clients:
+            # Do not send the message to the sender client.
+            if client_socket != sender_client:
+                try:
+                    client_socket.send(message.encode())
+                except:
+                    # If there is an error while sending the message to a client, remove the client from the list.
+                    self.remove_client(client_socket)
 
-        # Close the client's connection
-        if client_id in self.__clients:
-            self.__clients[client_id]["client_socket"].close()
-            self.__broadcast(f"[Broadcast] {self.__clients[client_id]['client_username']} has left the chat!")
-            print(f"[Server] {client_id} is closed.")
-            del self.__clients[client_id]
-
-    def stop(self) -> None:
+    def remove_client(self, client_socket: socket.socket):
         """
-            Stop the server.
+            Removes the client from the list.
         """
-        # Send a message to all clients that the server is closed
-        self.__broadcast("[Broadcast] The server is closed!")
+        if client_socket in self.clients:
+            client_name = client_socket.getpeername()
+            self.clients.remove(client_socket)
+            self.broadcast(f"[from server] {client_name} has left the server.")
+            print(f"[from server] {client_name} has left the server.")
+            client_socket.close()
 
-        # Close all client connections
-        for client in self.__clients:
-            self.__clients[client]["client_socket"].close()
-
-        # Close the server
-        self.__server.close()
-
-        print("[Server] Server is closed.")
 
 if __name__ == "__main__":
-    server = Server()
+    server = Server("127.0.0.1", 12345)
     server.start()
+
+"""
+    Output:
+    ------
+    [from server] Server is listening on 127.0.0.1:12345
+    [from server] user1 (('127.0.0.1', 58564)) has joined the server.
+    [from server] user2 (('127.0.0.1', 58566)) has joined the server.
+    
+    // After 5 seconds from the user1's connection and sending a message
+    [from server] ('127.0.0.1', 58564) has left the server.
+    
+    // After 5 seconds from the user2's connection and sending a message
+    [from server] ('127.0.0.1', 58566) has left the server.
+    
+"""
