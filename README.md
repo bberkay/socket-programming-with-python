@@ -1,4 +1,4 @@
-# Socket Programming with Python
+# Socket Programming with Threading in Python
 The main goal is to practice
 
 ### Output Scenario
